@@ -15,7 +15,8 @@ import echonet
 from echonet.models.cnn_lstm import CnnLstm
 
 
-def run(num_epochs=45,
+def run(dataset="echo",
+        num_epochs=45,
         modelname="r2plus1d_18",
         tasks="EF",
         frames=32,
@@ -98,8 +99,16 @@ def run(num_epochs=45,
         lr_step_period = math.inf
     scheduler = torch.optim.lr_scheduler.StepLR(optim, lr_step_period)
 
+    # Set dataset
+    if dataset == "echo":
+        data = echonet.datasets.Echo
+    elif dataset == "camus":
+        data = echonet.datasets.Camus
+    else:
+        print("Wrong Dataset!")
+
     # Compute mean and std
-    mean, std = echonet.utils.get_mean_and_std(echonet.datasets.Echo(split="train"))
+    mean, std = echonet.utils.get_mean_and_std(data(split="train"))
     kwargs = {"target_type": tasks,
               "mean": mean,
               "std": std,
@@ -108,7 +117,7 @@ def run(num_epochs=45,
               }
 
     # Set up datasets and dataloaders
-    train_dataset = echonet.datasets.Echo(split="train", **kwargs, pad=12)
+    train_dataset = data(split="train", **kwargs, pad=12)
     if n_train_patients is not None and len(train_dataset) > n_train_patients:
         # Subsample patients (used for ablation experiment)
         indices = np.random.choice(len(train_dataset), n_train_patients, replace=False)
@@ -117,7 +126,7 @@ def run(num_epochs=45,
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"), drop_last=True)
     val_dataloader = torch.utils.data.DataLoader(
-        echonet.datasets.Echo(split="val", **kwargs), batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"))
+        data(split="val", **kwargs), batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"))
     dataloaders = {'train': train_dataloader, 'val': val_dataloader}
 
     # Run training and testing loops
@@ -183,7 +192,7 @@ def run(num_epochs=45,
             for split in ["val", "test"]:
                 # Performance without test-time augmentation
                 dataloader = torch.utils.data.DataLoader(
-                    echonet.datasets.Echo(split=split, **kwargs),
+                    data(split=split, **kwargs),
                     batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"))
                 loss, yhat, y = echonet.utils.video.run_epoch(model, dataloader, False, None, device)
                 f.write("{} (one clip) R2:   {:.3f} ({:.3f} - {:.3f})\n".format(split, *echonet.utils.bootstrap(y, yhat, sklearn.metrics.r2_score)))
@@ -192,7 +201,7 @@ def run(num_epochs=45,
                 f.flush()
 
                 # Performance with test-time augmentation
-                ds = echonet.datasets.Echo(split=split, **kwargs, clips="all")
+                ds = data(split=split, **kwargs, clips="all")
                 dataloader = torch.utils.data.DataLoader(
                     ds, batch_size=1, num_workers=num_workers, shuffle=False, pin_memory=(device.type == "cuda"))
                 loss, yhat, y = echonet.utils.video.run_epoch(model, dataloader, False, None, device, save_all=True, block_size=100)
@@ -278,6 +287,8 @@ def run_epoch(model, dataloader, train, optim, device, save_all=False, block_siz
                 y.append(outcome.numpy())
                 X = X.to(device)
                 outcome = outcome.to(device)
+                if len(outcome.shape) > 1:
+                    outcome = torch.squeeze(outcome, dim=1)
 
                 average = (len(X.shape) == 6)
                 if average:
@@ -300,7 +311,7 @@ def run_epoch(model, dataloader, train, optim, device, save_all=False, block_siz
 
                 if not save_all:
                     yhat.append(outputs.view(-1).to("cpu").detach().numpy())
-
+                
                 loss = torch.nn.functional.mse_loss(outputs.view(-1), outcome)
 
                 if train:

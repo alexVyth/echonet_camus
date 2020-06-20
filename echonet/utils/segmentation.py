@@ -15,13 +15,14 @@ import tqdm
 import echonet
 
 
-def run(num_epochs=50,
+def run(dataset="echo",
+        num_epochs=50,
         modelname="deeplabv3_resnet50",
         pretrained=False,
         output=None,
         device=None,
         n_train_patients=None,
-        num_workers=4,
+        num_workers=1,
         batch_size=20,
         seed=0,
         lr_step_period=None,
@@ -97,8 +98,16 @@ def run(num_epochs=50,
         lr_step_period = math.inf
     scheduler = torch.optim.lr_scheduler.StepLR(optim, lr_step_period)
 
+    # Set dataset
+    if dataset == "echo":
+        data = echonet.datasets.Echo
+    elif dataset == "camus":
+        data = echonet.datasets.Camus
+    else:
+        print("Wrong Dataset!")
+
     # Compute mean and std
-    mean, std = echonet.utils.get_mean_and_std(echonet.datasets.Echo(split="train"))
+    mean, std = echonet.utils.get_mean_and_std(data(split="train"))
     tasks = ["LargeFrame", "SmallFrame", "LargeTrace", "SmallTrace"]
     kwargs = {"target_type": tasks,
               "mean": mean,
@@ -106,7 +115,7 @@ def run(num_epochs=50,
               }
 
     # Set up datasets and dataloaders
-    train_dataset = echonet.datasets.Echo(split="train", **kwargs)
+    train_dataset = data(split="train", **kwargs)
 
     if n_train_patients is not None and len(train_dataset) > n_train_patients:
         # Subsample patients (used for ablation experiment)
@@ -116,7 +125,7 @@ def run(num_epochs=50,
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"), drop_last=True)
     val_dataloader = torch.utils.data.DataLoader(
-        echonet.datasets.Echo(split="val", **kwargs), batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"))
+        data(split="val", **kwargs), batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=(device.type == "cuda"))
     dataloaders = {'train': train_dataloader, 'val': val_dataloader}
 
     # Run training and testing loops
@@ -183,7 +192,7 @@ def run(num_epochs=50,
         if run_test:
             # Run on validation and test
             for split in ["val", "test"]:
-                dataset = echonet.datasets.Echo(split=split, **kwargs)
+                dataset = data(split=split, **kwargs)
                 dataloader = torch.utils.data.DataLoader(dataset,
                                                          batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=(device.type == "cuda"))
                 loss, large_inter, large_union, small_inter, small_union = echonet.utils.segmentation.run_epoch(model, dataloader, False, None, device)
@@ -202,11 +211,11 @@ def run(num_epochs=50,
                 f.flush()
 
     # Saving videos with segmentations
-    dataset = echonet.datasets.Echo(split="test",
-                                    target_type=["Filename", "LargeIndex", "SmallIndex"],  # Need filename for saving, and human-selected frames to annotate
-                                    mean=mean, std=std,  # Normalization
-                                    length=None, max_length=None, period=1  # Take all frames
-                                    )
+    dataset = data(split="test",
+                   target_type=["Filename", "LargeIndex", "SmallIndex"],  # Need filename for saving, and human-selected frames to annotate
+                   mean=mean, std=std,  # Normalization
+                   length=None, max_length=None, period=1  # Take all frames
+                   )
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, num_workers=num_workers, shuffle=False, pin_memory=False, collate_fn=_video_collate_fn)
 
     # Save videos with segmentation
