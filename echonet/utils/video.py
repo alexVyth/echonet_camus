@@ -81,15 +81,15 @@ def run(num_epochs=45,
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Set up model
-
-    if device.type == "cuda":
-        model = torch.nn.DataParallel(model)
     if modelname == "cnn_lstm":
         model = CnnLstm()
     else:
         model = torchvision.models.video.__dict__[modelname](pretrained=pretrained)
         model.fc = torch.nn.Linear(model.fc.in_features, 1)
         model.fc.bias.data[0] = 55.6
+
+    if device.type == "cuda":
+        model = torch.nn.DataParallel(model)
     model.to(device)
 
     # Set up optimizer
