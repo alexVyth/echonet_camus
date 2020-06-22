@@ -8,3 +8,4 @@ echonet.egg-info/
 output/
 EF_prediction.py
 venv
+cmd.var

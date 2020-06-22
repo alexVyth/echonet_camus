@@ -29,7 +29,9 @@ def run(dataset="echo",
         batch_size=20,
         seed=0,
         lr_step_period=15,
-        run_test=False):
+        run_test=False,
+        pad=None,
+        problem="4ch"):
     """Trains/tests EF prediction model.
 
     Args:
@@ -109,15 +111,26 @@ def run(dataset="echo",
 
     # Compute mean and std
     mean, std = echonet.utils.get_mean_and_std(data(split="train"))
-    kwargs = {"target_type": tasks,
-              "mean": mean,
-              "std": std,
-              "length": frames,
-              "period": period,
-              }
+    if dataset == "echo":
+        kwargs = {"target_type": tasks,
+                  "mean": mean,
+                  "std": std,
+                  "length": frames,
+                  "period": period,
+                  "pad": 12,
+                  }
+    elif dataset == "camus":
+        kwargs = {"target_type": tasks,
+                  "mean": mean,
+                  "std": std,
+                  "length": frames,
+                  "period": period,
+                  "problem": problem,
+                  "pad": pad,
+                  }
 
     # Set up datasets and dataloaders
-    train_dataset = data(split="train", **kwargs, pad=12)
+    train_dataset = data(split="train", **kwargs)
     if n_train_patients is not None and len(train_dataset) > n_train_patients:
         # Subsample patients (used for ablation experiment)
         indices = np.random.choice(len(train_dataset), n_train_patients, replace=False)
@@ -311,7 +324,7 @@ def run_epoch(model, dataloader, train, optim, device, save_all=False, block_siz
 
                 if not save_all:
                     yhat.append(outputs.view(-1).to("cpu").detach().numpy())
-                
+
                 loss = torch.nn.functional.mse_loss(outputs.view(-1), outcome)
 
                 if train:

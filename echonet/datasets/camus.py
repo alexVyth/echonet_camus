@@ -1,7 +1,6 @@
 from torch.utils.data import Dataset
 import pathlib
 import os
-import collections
 import SimpleITK as sitk
 import numpy as np
 import cv2
@@ -15,19 +14,19 @@ def load_itk(filename):
     # Reads the image using SimpleITK
     itkimage = sitk.ReadImage(filename)
 
-    # Convert the image to a  numpy array first and then shuffle the dimensions 
-    # to get axis in the order z,y,x, 
+    # Convert the image to a  numpy array first and then shuffle the dimensions
+    # to get axis in the order z,y,x,
     ct_scan = sitk.GetArrayFromImage(itkimage)
     # also add channel dimension with reshape
-    ct_scan = ct_scan.reshape(1, ct_scan.shape[0], ct_scan.shape[1], 
+    ct_scan = ct_scan.reshape(1, ct_scan.shape[0], ct_scan.shape[1],
                               ct_scan.shape[2])
-    
+
     # Read the origin of the ct_scan, will be used to convert the coordinates from world to voxel and vice versa.
     origin = np.array(list(reversed(itkimage.GetOrigin())))
 
     # Read the spacing along each dimension
     spacing = np.array(list(reversed(itkimage.GetSpacing())))
-    
+
     return ct_scan, origin, spacing
 
 class Camus(Dataset):
@@ -76,6 +75,7 @@ class Camus(Dataset):
          Defaults to ``None''.
      target_transform (callable, optional): A function/transform that takes in the target and transforms it.
      external_test_location (string): Path to videos to use for external testing.
+     problem: problem to solve 2ch or 4ch
  """
     def __init__(self, root="../data/Camus/",
                  split="train", target_type="EF",
@@ -87,8 +87,9 @@ class Camus(Dataset):
                  noise=None,
                  target_transform=None,
                  external_test_location=None,
-                 resize=(112,112), 
-                 include_poor_quality=False):
+                 resize=(112,112),
+                 include_poor_quality=False,
+                 problem="4ch"):
         self.resize = resize
         self.mean = mean
         self.std =std
@@ -99,6 +100,8 @@ class Camus(Dataset):
         self.max_length = max_length
         self.period = period
         self.pad = pad
+        self.clips=clips
+        self.problem_id = problem[0]
         self.target_transform = target_transform
         if not isinstance(target_type, list):
             target_type = [target_type]
@@ -117,52 +120,45 @@ class Camus(Dataset):
             self.patients = sorted(os.listdir(self.split_dir))
         # filter out empty dirs and poor quality patients if asked
         if self.include_poor_quality:
-            self.patients = [self.patients[i] for i in range(len(self.patients)) 
-                             if (len(os.listdir(os.path.join(self.split_dir, 
+            self.patients = [self.patients[i] for i in range(len(self.patients))
+                             if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i])))) > 0]
         else:
-            self.patients = [self.patients[i] for i in range(len(self.patients)) 
-                             if (len(os.listdir(os.path.join(self.split_dir, 
+            self.patients = [self.patients[i] for i in range(len(self.patients))
+                             if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i]))) > 0
-                             and not self.has_poor_quality(self.patients[i]) 
-                             == False)]           
-        
+                             and self.has_fine_quality(self.patients[i]))]
+        print(len(self.patients))
+
     def __getitem__(self, idx):
         # initialise subdict for each patient
         d = {}
-        # list for 2 videos (2CH, 4CH)
-        videos = []
-        # subdictionary of info2
+        # subdictionary of info
         temp = {}
         if self.split != "val":
             patient_folder_name = "patient" + str(idx+1).zfill(4)
         else:
             patient_folder_name = "patient" + str(idx+1+400).zfill(4)
         with open(os.path.join(self.split_dir, patient_folder_name,
-                               "Info_2CH.cfg")) as f:
+                               "Info_"+self.problem_id+"CH.cfg")) as f:
             for line in f:
                 key, value = line.strip().split(': ')
                 temp[key] = value
         #append to main dict
-        d["info2"] = temp
-    
-        #subdictionary of info4
-        temp = {}
-        with open(os.path.join(self.split_dir, patient_folder_name,
-                               "Info_4CH.cfg")) as f:
-            for line in f:
-                key, value = line.strip().split(': ')
-                temp[key] = value
-        #append to main dict
-        d["info4"] = temp
-        
+        d["info"] = temp
+
         # read images and videos
-        prefixes = ["_2CH_ED.mhd", "_2CH_ED_gt.mhd", "_2CH_ES.mhd", 
-                    "_2CH_ES_gt.mhd", "_2CH_sequence.mhd", "_4CH_ED.mhd", 
-                    "_4CH_ED_gt.mhd", "_4CH_ES.mhd", "_4CH_ES_gt.mhd", 
-                    "_4CH_sequence.mhd"]
-        dict_names = ["ed2", "ed2_gt", "es2", "es2_gt", "sequence2",
-                  "ed4", "ed4_gt", "es4", "es4_gt", "sequence4"]
+        prefixes = ["_"+self.problem_id+"CH_ED.mhd",
+                    "_"+self.problem_id+"CH_ED_gt.mhd",
+                    "_"+self.problem_id+"CH_ES.mhd",
+                    "_"+self.problem_id+"CH_ES_gt.mhd",
+                    "_"+self.problem_id+"CH_sequence.mhd"]
+        dict_names = ["ed"+self.problem_id,
+                      "ed"+self.problem_id+"_gt",
+                      "es"+self.problem_id,
+                      "es"+self.problem_id+"_gt",
+                      "sequence"+self.problem_id]
+        
         for (prefix, name) in zip(prefixes, dict_names):
             #subdictionary of mhd
             temp = {}
@@ -173,15 +169,15 @@ class Camus(Dataset):
             # downsampling and normalisation depending on type of image
             if not "gt" in prefix:
                 img = img.astype("float32")
-                res = np.empty((channels, frames, self.resize[0], 
+                res = np.empty((channels, frames, self.resize[0],
                                        self.resize[1]), dtype=np.float32)
                 # downsampling to 112x112 with opencv (cubic interpolation)
                 for f in range(frames):
                     for c in range(channels):
-                        res[c, f, :, :] = cv2.resize(img[c, f, :, :], 
-                                         dsize=self.resize, 
+                        res[c, f, :, :] = cv2.resize(img[c, f, :, :],
+                                         dsize=self.resize,
                                          interpolation=cv2.INTER_CUBIC)
-                # normalisation 
+                # normalisation
                 res = np.repeat(res, 3, axis=0)
                 channels = res.shape[0]
                 if isinstance(  self.mean, (float, int)):
@@ -194,19 +190,15 @@ class Camus(Dataset):
                     res /= self.std.reshape(channels, 1, 1, 1)
             # downsampling without normalisation for gt
             else:
-                res = np.empty((channels, frames, self.resize[0], 
+                res = np.empty((channels, frames, self.resize[0],
                                 self.resize[1]), dtype=np.uint8)
                 # only nearest neighbour downsampling for GT
-                res[0, f, :, :] = cv2.resize(img[0, f, :, :], 
-                                        self.resize, 
+                res[0, f, :, :] = cv2.resize(img[0, f, :, :],
+                                        self.resize,
                                         interpolation=cv2.INTER_NEAREST)
-            img = res
-            #print(img.shape)
-            # extra video processing - Echonet c/p
-            video_flag = False
+            # extra processing for videos - Copied sections from Echonet 
             if "sequence" in prefix:
-                video_flag = True
-                video = img
+                video = res
                 # Add simulated noise (black out random pixels)
                 # 0 represents black at this point (video has not been normalized yet)
                 if self.noise is not None:
@@ -226,11 +218,11 @@ class Camus(Dataset):
                 else:
                     # Take specified number of frames
                     length = self.length
-        
+
                 if self.max_length is not None:
                     # Shorten videos to max_length
                     length = min(length, self.max_length)
-        
+
                 if f < length * self.period:
                     # Pad video with frames filled with zeros if too short
                     # 0 represents the mean color (dark grey), since this is after normalization
@@ -244,12 +236,22 @@ class Camus(Dataset):
                     tem = np.zeros((c, l, h + 2 * self.pad, w + 2 * self.pad),
                                     dtype=video.dtype)
                     # pylint: disable=E1130
-                    tem[:, :, self.pad:-self.pad, self.pad:-self.pad] = video  
+                    tem[:, :, self.pad:-self.pad, self.pad:-self.pad] = video
                     i, j = np.random.randint(0, 2 * self.pad, 2)
                     video = tem[:, :, i:(i + h), j:(j + w)]
-                videos.append(video)
-            if video_flag:
+                if self.clips == "all":
+                    # Take all possible clips of desired length
+                    start = np.arange(f - (length - 1) * self.period)
+                else:
+                    # Take random clips from video
+                    start = np.random.choice(f - (length - 1) * self.period, self.clips)
                 temp["video"] = video
+                # Select random clips
+                video = tuple(video[:, s + self.period * np.arange(length), :, :] for s in start)
+                if self.clips == 1:
+                    video = video[0]
+                else:
+                    video = np.stack(video)
             else:
                 temp["img"] = res
             temp["origin"] = origin
@@ -259,58 +261,44 @@ class Camus(Dataset):
         target = []
         for t in self.target_type:
             if t == "EF":
-                target.append(float(d["info4"]["LVef"]))
-                target = np.array(target, dtype = "float32")
+                target.append(np.array(float(d["info"]["LVef"]), dtype="float32"))
+            elif t == "EndFrame":
+                target.append(int(d["info"]["NbFrame"]))
             elif t == "EDV":
-                target.append(float(d["info4"]["LVedv"]))
+                target.append(float(d["info"]["LVedv"]))
             elif t == "ESV":
-                target.append(float(d["info4"]["LVesv"]))
+                target.append(float(d["info"]["LVesv"]))
             elif t == "Filename":
                 target.append(patient_folder_name)
-            elif t == "LargeIndex2":
+            elif t == "LargeIndex":
                 # Traces are sorted by cross-sectional area
                 # Largest (diastolic) frame is last
-                target.append(int(d["info2"]["ED"]))
-            elif t == "SmallIndex2":
+                target.append(int(d["info"]["ED"]))
+            elif t == "SmallIndex":
                 # Largest (diastolic) frame is first
-                target.append(int(d["info2"]["ES"]))
-            elif t == "LargeFrame2":
-                target.append(d["ed2"]["img"])
-            elif t == "SmallFrame2":
-                target.append(d["es2"]["img"])
-            elif t == "LargeTrace2":
-                target.append(d["ed2_gt"]["img"])
-            elif t == "SmallTrace2":
-                target.append(d["es2_gt"]["img"])
-            elif t == "LargeIndex4":
-                # Traces are sorted by cross-sectional area
-                # Largest (diastolic) frame is last
-                target.append(d["info4"]["ED"])
-            elif t == "SmallIndex4":
-                # Largest (diastolic) frame is first
-                target.append(d["info4"]["ES"])
-            elif t == "LargeFrame4":
-                target.append(d["ed4"]["img"])
-            elif t == "SmallFrame4":
-                target.append(d["es4"]["img"])
-            elif t == "LargeTrace4":
-                target.append(d["ed4_gt"]["img"])
-            elif t == "SmallTrace4":
-                target.append(d["es4_gt"]["img"])
+                target.append(int(d["info"]["ES"]))
+            elif t == "LargeFrame":
+                target.append(d["ed"]["img"])
+            elif t == "SmallFrame":
+                target.append(d["es"]["img"])
+            elif t == "LargeTrace":
+                target.append(d["ed_gt"]["img"])
+            elif t == "SmallTrace":
+                target.append(d["es_gt"]["img"])
         if target != []:
             target = tuple(target) if len(target) > 1 else target[0]
             if self.target_transform is not None:
                 target = self.target_transform(target)
-        return videos[0], target
-      
+        return video, target
+
     def __len__(self):
         return len(self.patients)
-    
-    def has_poor_quality(self, patient):
+
+    def has_fine_quality(self, patient):
         temp={}
         with open(os.path.join(self.split_dir, patient,
-                                   "Info_4CH.cfg")) as f:
+                               "Info_"+self.problem_id+"CH.cfg")) as f:
             for line in f:
                 key, value = line.strip().split(': ')
                 temp[key] = value
-        return (temp["ImageQuality"] == "Poor")
+        return temp["ImageQuality"] != "Poor"
