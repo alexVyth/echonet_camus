@@ -31,7 +31,9 @@ def run(dataset="echo",
         lr_step_period=15,
         run_test=False,
         pad=None,
-        problem="4ch"):
+        problem="4ch",
+        resize=(128,128),
+        clip_type=None):
     """Trains/tests EF prediction model.
 
     Args:
@@ -127,6 +129,8 @@ def run(dataset="echo",
                   "period": period,
                   "problem": problem,
                   "pad": pad,
+                  "resize": resize,
+                  "clip_type":clip_type,
                   }
 
     # Set up datasets and dataloaders
@@ -166,6 +170,13 @@ def run(dataset="echo",
                     torch.cuda.reset_max_memory_allocated(i)
                     torch.cuda.reset_max_memory_cached(i)
                 loss, yhat, y = echonet.utils.video.run_epoch(model, dataloaders[phase], phase == "train", optim, device)
+                print("Loss: ", loss)
+                print("R2: ",sklearn.metrics.r2_score(yhat, y))
+                #print("(y, yhat): ", list(zip(y, yhat)))
+                plt.figure()
+                plt.scatter(y,yhat)
+                plt.plot(np.linspace(0,100,5), np.linspace(0,100,5))
+                plt.savefig(os.path.join("figures", str(epoch)+str(phase)+".png"))
                 f.write("{},{},{},{},{},{},{},{},{}\n".format(epoch,
                                                               phase,
                                                               loss,

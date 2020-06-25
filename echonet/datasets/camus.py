@@ -76,6 +76,8 @@ class Camus(Dataset):
      target_transform (callable, optional): A function/transform that takes in the target and transforms it.
      external_test_location (string): Path to videos to use for external testing.
      problem: problem to solve 2ch or 4ch
+     clip_type: first_frame: keep clip containing first frame, edges: 
+                keep clip containing edges, None for random clips
  """
     def __init__(self, root="../data/Camus/",
                  split="train", target_type="EF",
@@ -89,7 +91,8 @@ class Camus(Dataset):
                  external_test_location=None,
                  resize=(112,112),
                  include_poor_quality=False,
-                 problem="4ch"):
+                 problem="4ch",
+                 clip_type=None):
         self.resize = resize
         self.mean = mean
         self.std =std
@@ -103,6 +106,8 @@ class Camus(Dataset):
         self.clips=clips
         self.problem_id = problem[0]
         self.target_transform = target_transform
+        self.clip_type =  clip_type
+        
         if not isinstance(target_type, list):
             target_type = [target_type]
         self.target_type = target_type
@@ -128,7 +133,6 @@ class Camus(Dataset):
                              if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i]))) > 0
                              and self.has_fine_quality(self.patients[i]))]
-        print(len(self.patients))
 
     def __getitem__(self, idx):
         # initialise subdict for each patient
@@ -212,46 +216,73 @@ class Camus(Dataset):
                     video[:, f, i, j] = 0
                 # Set number of frames
                 c, f, h, w = video.shape
-                if self.length is None:
-                    # Take as many frames as possible
-                    length = f // self.period
+                # not random clips case
+                if self.clips == 1 and self.clip_type == "edges":
+                    length = min(self.max_length, self.length)
+                    n_frames = min(length, f)                     
+                    if int(d["info"]["ED"]) < int(d["info"]["ES"]):
+                        chosen_frames = np.array(np.linspace(int(d["info"]["ED"])-1, 
+                                             int(d["info"]["ES"])-1, n_frames),
+                                             dtype="uint8")
+                    else:
+                        chosen_frames = np.array(np.linspace(int(d["info"]["ES"])-1, 
+                                             int(d["info"]["ED"])-1, n_frames),
+                                             dtype="uint8")
+                    # create video of predefined length containing edge frames
+                    video = np.array(video[:, chosen_frames, :, :])
+                    #create frames for padding after video creation
+                    c, f, h, w = video.shape
+                    if length > f: 
+                        video = np.concatenate((video, np.zeros((c, length - 
+                                                f, h, w),video.dtype)), axis=1)
+                # random clips case (Echonet way) 
                 else:
-                    # Take specified number of frames
-                    length = self.length
-
-                if self.max_length is not None:
-                    # Shorten videos to max_length
-                    length = min(length, self.max_length)
-
-                if f < length * self.period:
-                    # Pad video with frames filled with zeros if too short
-                    # 0 represents the mean color (dark grey), since this is after normalization
-                    video = np.concatenate((video, np.zeros((c, length * self.period - f, h, w), video.dtype)), axis=1)
-                    c, f, h, w = video.shape  # pylint: disable=E0633
-                if self.pad is not None:
-                    # Add padding of zeros (mean color of videos)
-                    # Crop of original size is taken out
-                    # (Used as augmentation)
-                    c, l, h, w = video.shape
-                    tem = np.zeros((c, l, h + 2 * self.pad, w + 2 * self.pad),
-                                    dtype=video.dtype)
-                    # pylint: disable=E1130
-                    tem[:, :, self.pad:-self.pad, self.pad:-self.pad] = video
-                    i, j = np.random.randint(0, 2 * self.pad, 2)
-                    video = tem[:, :, i:(i + h), j:(j + w)]
-                if self.clips == "all":
-                    # Take all possible clips of desired length
-                    start = np.arange(f - (length - 1) * self.period)
-                else:
-                    # Take random clips from video
-                    start = np.random.choice(f - (length - 1) * self.period, self.clips)
+                    if self.length is None:
+                        # Take as many frames as possible
+                        length = f // self.period
+                    else:
+                        # Take specified number of frames
+                        length = self.length
+    
+                    if self.max_length is not None:
+                        # Shorten videos to max_length
+                        length = min(length, self.max_length)
+    
+                    if f < length * self.period:
+                        # Pad video with frames filled with
+                        # 0 represents the mean color (dark grey), 
+                        # since this is after normalization
+                        video = np.concatenate((video, np.zeros((c, length * self.period - f, h, w), video.dtype)), axis=1)
+                        c, f, h, w = video.shape  # pylint: disable=E0633
+                    if self.pad is not None:
+                        # Add padding of zeros (mean color of videos)
+                        # Crop of original size is taken out
+                        # (Used as augmentation)
+                        c, l, h, w = video.shape
+                        tem = np.zeros((c, l, h + 2 * self.pad, w + 2 * self.pad),
+                                        dtype=video.dtype)
+                        # pylint: disable=E1130
+                        tem[:, :, self.pad:-self.pad, self.pad:-self.pad] = video
+                        i, j = np.random.randint(0, 2 * self.pad, 2)
+                        video = tem[:, :, i:(i + h), j:(j + w)]
+                    if self.clip_type == "first_frame":
+                        #force clip that includes first frame
+                        start =np.array([0,1])    
+                    elif self.clips == "all":
+                        # Take all possible clips of desired length
+                        start = np.arange(f - (length - 1) * self.period)
+                    else:
+                        # Take random clips from video
+                        start = np.random.choice(f - (length - 1) * self.period, self.clips)
+                    # Select random clips
+                    video = tuple(video[:, s + self.period * 
+                                  np.arange(length), :, :] for s in start)
+                    if self.clips == 1:
+                        # take only random clip 1
+                        video = video[0]
+                    else:
+                        video = np.stack(video)
                 temp["video"] = video
-                # Select random clips
-                video = tuple(video[:, s + self.period * np.arange(length), :, :] for s in start)
-                if self.clips == 1:
-                    video = video[0]
-                else:
-                    video = np.stack(video)
             else:
                 temp["img"] = res
             temp["origin"] = origin
