@@ -138,16 +138,13 @@ class Camus(Dataset):
                              if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i]))) > 0
                              and self.has_fine_quality(self.patients[i]))]
-        
+
     def __getitem__(self, idx):
         # initialise subdict for each patient
         d = {}
         # subdictionary of info
         temp = {}
-        if self.split != "val":
-            patient_folder_name = "patient" + str(idx+1).zfill(4)
-        else:
-            patient_folder_name = "patient" + str(idx+1+400).zfill(4)
+        patient_folder_name = self.patients[idx]
         with open(os.path.join(self.split_dir, patient_folder_name,
                                "Info_"+self.problem_id+"CH.cfg")) as f:
             for line in f:
