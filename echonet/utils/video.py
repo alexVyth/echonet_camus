@@ -33,7 +33,8 @@ def run(dataset="echo",
         pad=None,
         problem="4ch",
         resize=(128,128),
-        clip_type=None):
+        clip_type=None,
+        cv=0):
     """Trains/tests EF prediction model.
 
     Args:
@@ -120,6 +121,7 @@ def run(dataset="echo",
                   "length": frames,
                   "period": period,
                   "pad": 12,
+                  "cv": cv,
                   }
     elif dataset == "camus":
         kwargs = {"target_type": tasks,
@@ -131,6 +133,7 @@ def run(dataset="echo",
                   "pad": pad,
                   "resize": resize,
                   "clip_type":clip_type,
+                  "cv": cv,
                   }
 
     # Set up datasets and dataloaders

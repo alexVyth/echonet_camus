@@ -90,9 +90,10 @@ class Camus(Dataset):
                  target_transform=None,
                  external_test_location=None,
                  resize=(112,112),
-                 include_poor_quality=False,
+                 include_poor_quality=True,
                  problem="4ch",
-                 clip_type=None):
+                 clip_type=None,
+                 cv=0):
         self.resize = resize
         self.mean = mean
         self.std =std
@@ -103,11 +104,12 @@ class Camus(Dataset):
         self.max_length = max_length
         self.period = period
         self.pad = pad
-        self.clips=clips
+        self.clips = clips
         self.problem_id = problem[0]
         self.target_transform = target_transform
-        self.clip_type =  clip_type
-        
+        self.clip_type = clip_type
+        self.cv = cv
+
         if not isinstance(target_type, list):
             target_type = [target_type]
         self.target_type = target_type
@@ -117,23 +119,26 @@ class Camus(Dataset):
             self.split_dir = pathlib.Path(os.path.join(root, "training"))
             # patient folder names = patient0xxx
             self.patients = sorted(os.listdir(self.split_dir))
+            self.patients = self.patients[0: 45 * self.cv] + self.patients[45 * self.cv + 45:]
         elif self.split == "test":
             self.split_dir = pathlib.Path(os.path.join(root, "testing"))
             self.patients = sorted(os.listdir(self.split_dir))
         elif self.split == "val":
-            self.split_dir = pathlib.Path(os.path.join(root, "validation"))
+            self.split_dir = pathlib.Path(os.path.join(root, "training"))
             self.patients = sorted(os.listdir(self.split_dir))
+            self.patients = self.patients[45 * self.cv: 45 * self.cv + 45]
         # filter out empty dirs and poor quality patients if asked
         if self.include_poor_quality:
             self.patients = [self.patients[i] for i in range(len(self.patients))
                              if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i])))) > 0]
+
         else:
             self.patients = [self.patients[i] for i in range(len(self.patients))
                              if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i]))) > 0
                              and self.has_fine_quality(self.patients[i]))]
-
+        
     def __getitem__(self, idx):
         # initialise subdict for each patient
         d = {}
