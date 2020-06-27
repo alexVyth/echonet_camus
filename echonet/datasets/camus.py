@@ -112,6 +112,7 @@ class Camus(Dataset):
         self.clip_type = clip_type
         self.cv = cv
         self.left_only = left_only
+        self.fnames, self.outcome = [], []
 
         if not isinstance(target_type, list):
             target_type = [target_type]
@@ -141,6 +142,8 @@ class Camus(Dataset):
                              if (len(os.listdir(os.path.join(self.split_dir,
                                                         self.patients[i]))) > 0
                              and self.has_fine_quality(self.patients[i]))]
+        self.fnames = self.patients
+        self.outcome = list(range(len(self.patients)))
 
     def __getitem__(self, idx):
         # initialise subdict for each patient
