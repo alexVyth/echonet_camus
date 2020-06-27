@@ -80,7 +80,8 @@ class Camus(Dataset):
                 keep clip containing edges, None for random clips
  """
     def __init__(self, root="../data/Camus/",
-                 split="train", target_type="EF",
+                 split="train",
+                 target_type="EF",
                  mean=0., std=1.,
                  length=16, period=2,
                  max_length=250,
@@ -93,10 +94,11 @@ class Camus(Dataset):
                  include_poor_quality=True,
                  problem="4ch",
                  clip_type=None,
-                 cv=0):
+                 cv=0,
+                 left_only=True):
         self.resize = resize
         self.mean = mean
-        self.std =std
+        self.std = std
         self.root = root
         self.split = split
         self.noise = noise
@@ -109,6 +111,7 @@ class Camus(Dataset):
         self.target_transform = target_transform
         self.clip_type = clip_type
         self.cv = cv
+        self.left_only = left_only
 
         if not isinstance(target_type, list):
             target_type = [target_type]
@@ -159,12 +162,12 @@ class Camus(Dataset):
                     "_"+self.problem_id+"CH_ES.mhd",
                     "_"+self.problem_id+"CH_ES_gt.mhd",
                     "_"+self.problem_id+"CH_sequence.mhd"]
-        dict_names = ["ed"+self.problem_id,
-                      "ed"+self.problem_id+"_gt",
-                      "es"+self.problem_id,
-                      "es"+self.problem_id+"_gt",
-                      "sequence"+self.problem_id]
-        
+        dict_names = ["ed",
+                      "ed" + "_gt",
+                      "es",
+                      "es" + "_gt",
+                      "sequence"]
+
         for (prefix, name) in zip(prefixes, dict_names):
             #subdictionary of mhd
             temp = {}
@@ -311,13 +314,19 @@ class Camus(Dataset):
                 # Largest (diastolic) frame is first
                 target.append(int(d["info"]["ES"]))
             elif t == "LargeFrame":
-                target.append(d["ed"]["img"])
+                target.append(np.squeeze(d["ed"]["img"], axis=1))
             elif t == "SmallFrame":
-                target.append(d["es"]["img"])
+                target.append(np.squeeze(d["es"]["img"], axis=1))
             elif t == "LargeTrace":
-                target.append(d["ed_gt"]["img"])
+                if self.left_only:
+                    target.append(np.array(np.squeeze(d["ed_gt"]["img"] == 1).reshape(self.resize), dtype="float"))
+                else:
+                    target.append(np.squeeze(d["ed_gt"]["img"]).reshape(self.resize))
             elif t == "SmallTrace":
-                target.append(d["es_gt"]["img"])
+                if self.left_only:
+                    target.append(np.array(np.squeeze(d["es_gt"]["img"] == 1).reshape(self.resize), dtype="float"))
+                else:
+                    target.append(np.squeeze(d["es_gt"]["img"]).reshape(self.resize))
         if target != []:
             target = tuple(target) if len(target) > 1 else target[0]
             if self.target_transform is not None:

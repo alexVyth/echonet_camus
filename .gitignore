@@ -10,3 +10,4 @@ EF_prediction.py
 venv
 cmd.var
 figures/
+build/
